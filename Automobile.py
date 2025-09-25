@@ -26,15 +26,15 @@ class Automobile(BaseModel):
     )
 
     # id_: UUID4 | None = Field(default_factory=uuid4)
-    id_: UUID4 | None = None
+    id_: UUID4 = Field(default_factory=uuid4)
     manufacturer: str
     series_name: str
     type_: AutomobileType
     is_electric: bool = False
-    manufactured_date: date = Field(validation_alias="completionDate")
+    manufactured_date: date = Field(validation_alias="completionDate", ge=date(1980, 1, 1))
     base_msrp_usd: float = Field(validation_alias="msrpUSD", serialization_alias="baseMSRPUSD")
     vin: str
-    number_of_doors: int = Field(default=4, validation_alias="doors")
+    number_of_doors: int = Field(default=4, validation_alias="doors", ge=2, le=4, multiple_of=2)
     registration_country: str | None = None
     license_plate: str | None = None
 
@@ -59,7 +59,7 @@ data = {
     "licensePlate": "AAA-BBB"
 }
 
-expected_serialized_dict_by_alias = {
+expected_serialized_by_alias = {
     'id': UUID('c4e60f4a-3c7f-4da5-9b3f-07aee50b23e7'),
     'manufacturer': 'BMW',
     'seriesName': 'M4',
@@ -72,9 +72,6 @@ expected_serialized_dict_by_alias = {
     'registrationCountry': 'France',
     'licensePlate': 'AAA-BBB'
 }
-
-a1 = Automobile.model_validate(data)
-print(a1.model_dump(by_alias=True) == expected_serialized_dict_by_alias)
 
 data_no_id = {
     "manufacturer": "BMW",
@@ -89,19 +86,9 @@ data_no_id = {
     "licensePlate": "AAA-BBB"
 }
 
-expected_serialization_data_no_id_by_alias = {
-    'id': None,
-    'manufacturer': 'BMW',
-    'seriesName': 'M4',
-    'type': AutomobileType.convertible,
-    'isElectric': False,
-    'manufacturedDate': date(2023, 1, 1),
-    'baseMSRPUSD': 93300.0,
-    'vin': '1234567890',
-    'numberOfDoors': 2,
-    'registrationCountry': 'France',
-    'licensePlate': 'AAA-BBB'
-}
+a1 = Automobile.model_validate(data)
+print(a1.model_dump(by_alias=True) == expected_serialized_by_alias)
 
 a2 = Automobile.model_validate(data_no_id)
-print(a2.model_dump(by_alias=True) == expected_serialization_data_no_id_by_alias)
+a3 = Automobile.model_validate(data_no_id)
+print(a2.id_ != a3.id_)
