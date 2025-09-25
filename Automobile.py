@@ -1,7 +1,8 @@
 from datetime import date, timezone
 from enum import Enum
+from uuid import uuid4, UUID
 from pprint import pprint
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, FieldSerializationInfo
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, FieldSerializationInfo, UUID4
 from pydantic.alias_generators import to_camel
 
 class AutomobileType(Enum):
@@ -24,6 +25,8 @@ class Automobile(BaseModel):
         alias_generator=make_alias
     )
 
+    # id_: UUID4 | None = Field(default_factory=uuid4)
+    id_: UUID4 | None = None
     manufacturer: str
     series_name: str
     type_: AutomobileType
@@ -42,35 +45,22 @@ class Automobile(BaseModel):
         return date
 
 # Deserializing and serializing
-data_json = '''
-{
+data = {
+    "id": "c4e60f4a-3c7f-4da5-9b3f-07aee50b23e7",
     "manufacturer": "BMW",
     "seriesName": "M4",
     "type": "Convertible",
-    "isElectric": false,
+    "isElectric": False,
     "completionDate": "2023-01-01",
-    "msrpUSD": 93300,
+    "msrpUSD": 93_300,
     "vin": "1234567890",
     "doors": 2,
     "registrationCountry": "France",
     "licensePlate": "AAA-BBB"
 }
-'''
-
-expected_serialized_dict = {
-    'manufacturer': 'BMW',
-    'series_name': 'M4',
-    'type_': AutomobileType.convertible,
-    'is_electric': False,
-    'manufactured_date': date(2023, 1, 1),
-    'base_msrp_usd': 93300.0,
-    'vin': '1234567890',
-    'number_of_doors': 2,
-    'registration_country': 'France',
-    'license_plate': 'AAA-BBB'
-}
 
 expected_serialized_dict_by_alias = {
+    'id': UUID('c4e60f4a-3c7f-4da5-9b3f-07aee50b23e7'),
     'manufacturer': 'BMW',
     'seriesName': 'M4',
     'type': AutomobileType.convertible,
@@ -83,15 +73,35 @@ expected_serialized_dict_by_alias = {
     'licensePlate': 'AAA-BBB'
 }
 
-expected_serialized_json_by_alias = (
-    '{"manufacturer":"BMW","seriesName":"M4","type":"Convertible",'
-    '"isElectric":false,"manufacturedDate":"2023/01/01","baseMSRPUSD":93300.0,'
-    '"vin":"1234567890","numberOfDoors":2,"registrationCountry":"France",'
-    '"licensePlate":"AAA-BBB"}'
-)
-
-a1 = Automobile.model_validate_json(data_json)
-
-print(a1.model_dump() == expected_serialized_dict)
+a1 = Automobile.model_validate(data)
 print(a1.model_dump(by_alias=True) == expected_serialized_dict_by_alias)
-print(a1.model_dump_json(by_alias=True) == expected_serialized_json_by_alias)
+
+data_no_id = {
+    "manufacturer": "BMW",
+    "seriesName": "M4",
+    "type": "Convertible",
+    "isElectric": False,
+    "completionDate": "2023-01-01",
+    "msrpUSD": 93_300,
+    "vin": "1234567890",
+    "doors": 2,
+    "registrationCountry": "France",
+    "licensePlate": "AAA-BBB"
+}
+
+expected_serialization_data_no_id_by_alias = {
+    'id': None,
+    'manufacturer': 'BMW',
+    'seriesName': 'M4',
+    'type': AutomobileType.convertible,
+    'isElectric': False,
+    'manufacturedDate': date(2023, 1, 1),
+    'baseMSRPUSD': 93300.0,
+    'vin': '1234567890',
+    'numberOfDoors': 2,
+    'registrationCountry': 'France',
+    'licensePlate': 'AAA-BBB'
+}
+
+a2 = Automobile.model_validate(data_no_id)
+print(a2.model_dump(by_alias=True) == expected_serialization_data_no_id_by_alias)
