@@ -1,7 +1,7 @@
 from datetime import date
 from enum import Enum
 from uuid import uuid4, UUID
-from typing import Annotated, TypeVar
+from typing import Annotated, TypeVar, Any
 from pprint import pprint
 from pydantic import (
     BaseModel, 
@@ -11,9 +11,14 @@ from pydantic import (
     FieldSerializationInfo, 
     UUID4, 
     StringConstraints, 
-    ValidationError
+    ValidationError,
+    field_validator,
+    BeforeValidator,
+    AfterValidator,
+    ValidationInfo
 )
 from pydantic.alias_generators import to_camel
+from dateutil import parser
 
 class AutomobileType(Enum):
     sedan = "Sedan"
@@ -22,14 +27,58 @@ class AutomobileType(Enum):
     suv = "SUV"
     truck = "Truck"
 
+countries = {
+    "australia": ("Australia", "AUS"),
+    "canada": ("Canada", "CAN"),
+    "china": ("China", "CHN"),
+    "france": ("France", "FRA"),
+    "germany": ("Germany", "DEU"),
+    "india": ("India", "IND"),
+    "mexico": ("Mexico", "MEX"),
+    "norway": ("Norway", "NOR"),
+    "pakistan": ("Pakistan", "PAK"),
+    "san marino": ("San Marino", "SMR"),
+    "sanmarino": ("San Marino", "SMR"),
+    "spain": ("Spain", "ESP"),
+    "sweden": ("Sweden", "SWE"),
+    "united kingdom": ("United Kingdom", "GBR"),
+    "uk": ("United Kingdom", "GBR"),
+    "great britain": ("United Kingdom", "GBR"),
+    "britain": ("United Kingdom", "GBR"),
+    "us": ("United States of America", "USA"),
+    "united states": ("United States of America", "USA"),
+    "usa": ("United States of America", "USA"),
+}
+
 def make_alias(field_name: str):
     alias = to_camel(field_name)
     return alias.removesuffix("_")
+
+def parse_dt_str(value: Any):
+    if isinstance(value, str):
+        try:
+            parsed_date = parser.parse(value).date()
+        except Exception as exc:
+            raise ValueError(str(exc))
+        else:
+            return parsed_date
+    return value
+
+    
+def validate_country_name(name: str):
+    name_lower = name.lower()
+
+    if name_lower in countries:
+        return countries[name_lower][0]
+    raise ValueError(f"Invalid country name: {name}")
 
 BoundedString = Annotated[str, StringConstraints(min_length=2, max_length=50)]
 
 ElementType = TypeVar("ElementType")
 BoundedList = Annotated[list[ElementType], Field(min_length=1, max_length=5)]
+
+ValidDate = Annotated[date, BeforeValidator(parse_dt_str)]
+ValidCountry = Annotated[str, AfterValidator(validate_country_name)]
 
 class Automobile(BaseModel):
     model_config = ConfigDict(
@@ -51,14 +100,23 @@ class Automobile(BaseModel):
     top_features: BoundedList[BoundedString] | None = None
     vin: BoundedString
     number_of_doors: int = Field(default=4, validation_alias="doors", ge=2, le=4, multiple_of=2)
-    registration_country: BoundedString | None = None
+    registration_country: ValidCountry | None = None
+    registration_date: date | None = None
     license_plate: BoundedString | None = None
 
-    @field_serializer("manufactured_date", when_used="unless-none")
+    @field_serializer("manufactured_date", "registration_date", when_used="unless-none")
     def date_serializer(self, date: date, info: FieldSerializationInfo):
         if info.mode_is_json():
             return date.strftime("%Y/%m/%d")
         return date
+    
+    @field_validator("registration_date", mode="after")
+    @classmethod
+    def registration_after_manfactured(cls, d: date | None, info: ValidationInfo):
+        if isinstance(d, date) and ("manufactured_date" in info.data):
+            if d < info.data["manufactured_date"]:
+                raise ValueError(f'`registration_date` must be preceded by `manufactured_date`.')
+        return d
 
 # Deserializing and serializing
 data = {
@@ -72,11 +130,12 @@ data = {
     "topFeatures": ["6 cylinders", "all-wheel drive", "convertible"],
     "vin": "1234567890",
     "doors": 2,
-    "registrationCountry": "France",
+    "registrationCountry": "usaa",
+    "registrationDate": "2023-06-01",
     "licensePlate": "AAA-BBB"
 }
 
-expected_serialized_by_alias = {
+expected_by_alias = {
     'id': UUID('c4e60f4a-3c7f-4da5-9b3f-07aee50b23e7'),
     'manufacturer': 'BMW',
     'seriesName': 'M4 Competition xDrive',
@@ -87,9 +146,17 @@ expected_serialized_by_alias = {
     'topFeatures': ['6 cylinders', 'all-wheel drive', 'convertible'],
     'vin': '1234567890',
     'numberOfDoors': 2,
-    'registrationCountry': 'France',
+    'registrationCountry': 'United States of America',
+    'registrationDate': date(2023, 6, 1),
     'licensePlate': 'AAA-BBB'
 }
 
-a1 = Automobile.model_validate(data)
-print(a1.model_dump(by_alias=True) == expected_serialized_by_alias)
+expected_json_by_alias = '{"id":"c4e60f4a-3c7f-4da5-9b3f-07aee50b23e7","manufacturer":"BMW","seriesName":"M4 Competition xDrive","type":"Convertible","isElectric":false,"manufacturedDate":"2023/01/01","baseMSRPUSD":93300.0,"topFeatures":["6 cylinders","all-wheel drive","convertible"],"vin":"1234567890","numberOfDoors":2,"registrationCountry":"United States of America","registrationDate":"2023/06/01","licensePlate":"AAA-BBB"}'
+
+try:
+    a1 = Automobile.model_validate(data)
+except ValidationError as exc:
+    print(exc.json(indent=2))
+else:
+    print(a1.model_dump(by_alias=True) == expected_by_alias)
+    print(a1.model_dump_json(by_alias=True) == expected_json_by_alias)
