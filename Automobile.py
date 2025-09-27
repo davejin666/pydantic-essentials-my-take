@@ -2,20 +2,21 @@ from datetime import date
 from enum import Enum
 from uuid import uuid4, UUID
 from typing import Annotated, TypeVar, Any
-from pprint import pprint
+from functools import cached_property
 from pydantic import (
     BaseModel, 
     ConfigDict, 
     Field, 
     field_serializer, 
     FieldSerializationInfo, 
+    field_validator,
+    ValidationInfo,
     UUID4, 
     StringConstraints, 
     ValidationError,
-    field_validator,
     BeforeValidator,
     AfterValidator,
-    ValidationInfo
+    computed_field
 )
 from pydantic.alias_generators import to_camel
 from dateutil import parser
@@ -48,6 +49,12 @@ countries = {
     "us": ("United States of America", "USA"),
     "united states": ("United States of America", "USA"),
     "usa": ("United States of America", "USA"),
+}
+
+country_codes = {
+    name: code
+    for name, code
+    in countries.values()
 }
 
 def make_alias(field_name: str):
@@ -86,7 +93,7 @@ class Automobile(BaseModel):
         str_strip_whitespace=True,
         validate_assignment=True,
         validate_default=True,
-        alias_generator=make_alias
+        alias_generator=make_alias,
     )
 
     # id_: UUID4 | None = Field(default_factory=uuid4)
@@ -94,13 +101,13 @@ class Automobile(BaseModel):
     manufacturer: BoundedString
     series_name: BoundedString
     type_: AutomobileType
-    is_electric: bool = False
+    is_electric: bool = Field(default=False, repr=False)
     manufactured_date: date = Field(validation_alias="completionDate", ge=date(1980, 1, 1))
-    base_msrp_usd: float = Field(validation_alias="msrpUSD", serialization_alias="baseMSRPUSD")
-    top_features: BoundedList[BoundedString] | None = None
-    vin: BoundedString
+    base_msrp_usd: float = Field(validation_alias="msrpUSD", serialization_alias="baseMSRPUSD", repr=False)
+    top_features: BoundedList[BoundedString] | None = Field(default=None, repr=False)
+    vin: BoundedString = Field(repr=False)
     number_of_doors: int = Field(default=4, validation_alias="doors", ge=2, le=4, multiple_of=2)
-    registration_country: ValidCountry | None = None
+    registration_country: ValidCountry | None = Field(default=None, frozen=True)
     registration_date: date | None = None
     license_plate: BoundedString | None = None
 
@@ -117,6 +124,11 @@ class Automobile(BaseModel):
             if d < info.data["manufactured_date"]:
                 raise ValueError(f'`registration_date` must be preceded by `manufactured_date`.')
         return d
+    
+    @computed_field(alias="registrationCountryCode")
+    @cached_property
+    def registration_country_code(self) -> str:
+        return country_codes.get(self.registration_country, None)
 
 # Deserializing and serializing
 data = {
@@ -130,12 +142,12 @@ data = {
     "topFeatures": ["6 cylinders", "all-wheel drive", "convertible"],
     "vin": "1234567890",
     "doors": 2,
-    "registrationCountry": "usaa",
+    "registrationCountry": "us",
     "registrationDate": "2023-06-01",
     "licensePlate": "AAA-BBB"
 }
 
-expected_by_alias = {
+expected_serialized_by_alias = {
     'id': UUID('c4e60f4a-3c7f-4da5-9b3f-07aee50b23e7'),
     'manufacturer': 'BMW',
     'seriesName': 'M4 Competition xDrive',
@@ -147,16 +159,14 @@ expected_by_alias = {
     'vin': '1234567890',
     'numberOfDoors': 2,
     'registrationCountry': 'United States of America',
+    'registrationCountryCode': 'USA',
     'registrationDate': date(2023, 6, 1),
-    'licensePlate': 'AAA-BBB'
+    'licensePlate': 'AAA-BBB',
 }
-
-expected_json_by_alias = '{"id":"c4e60f4a-3c7f-4da5-9b3f-07aee50b23e7","manufacturer":"BMW","seriesName":"M4 Competition xDrive","type":"Convertible","isElectric":false,"manufacturedDate":"2023/01/01","baseMSRPUSD":93300.0,"topFeatures":["6 cylinders","all-wheel drive","convertible"],"vin":"1234567890","numberOfDoors":2,"registrationCountry":"United States of America","registrationDate":"2023/06/01","licensePlate":"AAA-BBB"}'
 
 try:
     a1 = Automobile.model_validate(data)
 except ValidationError as exc:
     print(exc.json(indent=2))
 else:
-    print(a1.model_dump(by_alias=True) == expected_by_alias)
-    print(a1.model_dump_json(by_alias=True) == expected_json_by_alias)
+    print(repr(a1))
